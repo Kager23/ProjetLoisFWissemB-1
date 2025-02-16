@@ -1,29 +1,31 @@
 import random
 import base64
 import sys
+import math
 
+# Fonction pour vérifier si un nombre est premier
 def is_prime(num):
     if num < 2:
         return False
-    for i in range(2, int(num**0.5) + 1):
+    for i in range(2, int(math.isqrt(num)) + 1):
         if num % i == 0:
             return False
     return True
 
-def generate_prime_candidate(length):
-    return random.getrandbits(length)
-
+# Génère un nombre premier de longueur donnée (par défaut 10 chiffres)
 def generate_prime_number(length=10):
-    p = 4
-    while not is_prime(p):
-        p = generate_prime_candidate(length)
-    return p
+    while True:
+        p = random.getrandbits(length)
+        if is_prime(p):
+            return p
 
+# Calcul du PGCD (Plus Grand Commun Diviseur)
 def gcd(a, b):
     while b != 0:
         a, b = b, a % b
     return a
 
+# Calcul de l'inverse modulaire (e^-1 mod phi)
 def modinv(a, m):
     m0, x0, x1 = m, 0, 1
     if m == 1:
@@ -36,56 +38,68 @@ def modinv(a, m):
         x1 += m0
     return x1
 
+# Génère une paire de clés RSA (publique et privée)
 def generate_keys():
     p = generate_prime_number()
     q = generate_prime_number()
-    while q == p:
+    while q == p:  # Assure que p et q sont différents
         q = generate_prime_number()
     
     n = p * q
     phi = (p - 1) * (q - 1)
     
+    # Choix de e (premier avec phi)
     e = random.randrange(1, phi)
-    g = gcd(e, phi)
-    while g != 1:
+    while gcd(e, phi) != 1:
         e = random.randrange(1, phi)
-        g = gcd(e, phi)
     
+    # Calcul de d (inverse de e modulo phi)
     d = modinv(e, phi)
     
     return ((e, n), (d, n))
 
+# Sauvegarde les clés dans des fichiers au format spécifié
 def save_keys(public_key, private_key, filename="monRSA"):
-    pub_key_str = "---begin monRSA public key---\n" + base64.b64encode(f"{public_key[1]:x}\n{public_key[0]:x}".encode()).decode() + "\n---end monRSA key---"
-    priv_key_str = "---begin monRSA private key---\n" + base64.b64encode(f"{private_key[1]:x}\n{private_key[0]:x}".encode()).decode() + "\n---end monRSA key---"
+    # Clé publique
+    pub_key_str = f"{public_key[1]:x}\n{public_key[0]:x}"
+    pub_key_encoded = base64.b64encode(pub_key_str.encode()).decode()
+    pub_key_file = f"{filename}.pub"
+    with open(pub_key_file, "w", encoding="utf-8") as f:
+        f.write(f"---begin monRSA public key---\n{pub_key_encoded}\n---end monRSA key---")
     
-    with open(f"{filename}.pub", "w", encoding="utf-8") as pub_file:
-        pub_file.write(pub_key_str)
+    # Clé privée
+    priv_key_str = f"{private_key[1]:x}\n{private_key[0]:x}"
+    priv_key_encoded = base64.b64encode(priv_key_str.encode()).decode()
+    priv_key_file = f"{filename}.priv"
+    with open(priv_key_file, "w", encoding="utf-8") as f:
+        f.write(f"---begin monRSA private key---\n{priv_key_encoded}\n---end monRSA key---")
     
-    with open(f"{filename}.priv", "w", encoding="utf-8") as priv_file:
-        priv_file.write(priv_key_str)
+    print(f"Clés sauvegardées dans {pub_key_file} et {priv_key_file}")
 
+# Lit une clé publique depuis un fichier
 def read_public_key(filename):
-    with open(filename, "r", encoding="utf-8") as file:
-        lines = file.readlines()
+    with open(filename, "r", encoding="utf-8") as f:
+        lines = f.readlines()
         if lines[0].strip() != "---begin monRSA public key---":
-            raise ValueError("Invalid public key file")
+            raise ValueError("Format de clé publique invalide")
         key_data = base64.b64decode(lines[1].strip()).decode()
-        n, e = key_data.split('\n')
-        return (int(e, 16), int(n, 16))
+        n_hex, e_hex = key_data.split('\n')
+        return (int(e_hex, 16), int(n_hex, 16))
 
+# Lit une clé privée depuis un fichier
 def read_private_key(filename):
-    with open(filename, "r", encoding="utf-8") as file:
-        lines = file.readlines()
+    with open(filename, "r", encoding="utf-8") as f:
+        lines = f.readlines()
         if lines[0].strip() != "---begin monRSA private key---":
-            raise ValueError("Invalid private key file")
+            raise ValueError("Format de clé privée invalide")
         key_data = base64.b64decode(lines[1].strip()).decode()
-        n, d = key_data.split('\n')
-        return (int(d, 16), int(n, 16))
+        n_hex, d_hex = key_data.split('\n')
+        return (int(d_hex, 16), int(n_hex, 16))
 
+# Chiffre un message avec la clé publique
 def encrypt(public_key, plaintext):
-    key, n = public_key
-    cipher = [(ord(char) ** key) % n for char in plaintext]
+    e, n = public_key
+    cipher = [pow(ord(char), e, n) for char in plaintext]  # Chiffrement RSA
     cipher_bytes = bytearray()
     for value in cipher:
         while value > 0:
@@ -93,9 +107,10 @@ def encrypt(public_key, plaintext):
             value //= 256
     return base64.b64encode(cipher_bytes).decode('utf-8')
 
+# Déchiffre un message avec la clé privée
 def decrypt(private_key, ciphertext):
-    key, n = private_key
-    # Ajout de remplissage correct pour Base64
+    d, n = private_key
+    # Ajout de padding pour Base64 si nécessaire
     padding = len(ciphertext) % 4
     if padding != 0:
         ciphertext += "=" * (4 - padding)
@@ -106,9 +121,10 @@ def decrypt(private_key, ciphertext):
         if i + 1 < len(cipher_bytes):
             value += cipher_bytes[i + 1] * 256
         cipher.append(value)
-    plain = [chr((char ** key) % n) for char in cipher]
+    plain = [chr(pow(char, d, n)) for char in cipher]  # Déchiffrement RSA
     return ''.join(plain)
 
+# Fonction principale pour gérer les arguments en ligne de commande
 def main(args):
     if len(args) < 1 or args[0] == "help":
         print("Script monRSA par Nug")
@@ -129,7 +145,6 @@ def main(args):
         if "-f" in args:
             filename = args[args.index("-f") + 1]
         save_keys(public_key, private_key, filename)
-        print(f"Clés générées et sauvegardées dans {filename}.pub et {filename}.priv")
 
     elif command == "crypt":
         if len(args) < 3:
